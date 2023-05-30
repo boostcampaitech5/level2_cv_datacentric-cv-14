@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--save_interval', type=int, default=5)
     parser.add_argument('--ignore_tags', type=list, default=['masked', 'excluded-region', 'maintable', 'stamp'])
     
-    parser.add_argument('--wandb_logging', type=bool, default='True')
+    parser.add_argument('--wandb_logging', type=bool, default='False')
     parser.add_argument('--wandb_entity', type=str, default='hi-ai')
     parser.add_argument('--wandb_project', type=str, default='OCR_Project')
     parser.add_argument('--wandb_name', type=str, default='EAST_1')
