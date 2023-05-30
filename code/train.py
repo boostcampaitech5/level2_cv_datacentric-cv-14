@@ -15,7 +15,7 @@ from east_dataset import EASTDataset
 from dataset import SceneTextDataset
 from model import EAST
 from scheduler import CosineAnnealingWarmUpRestarts
-# jjjjj
+# 주석
 import wandb
 
 def parse_args():
