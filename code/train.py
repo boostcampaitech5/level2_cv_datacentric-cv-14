@@ -11,10 +11,12 @@ from torch.utils.data import DataLoader
 from torch.optim import lr_scheduler
 from tqdm import tqdm
 
-from east_dataset import EASTDataset ### 
-from dataset import SceneTextDataset ### 
-from model import EAST ###
+from east_dataset import EASTDataset
+from dataset import SceneTextDataset
+from model import EAST
+from scheduler import CosineAnnealingWarmUpRestarts
 
+import wandb
 
 def parse_args():
     parser = ArgumentParser()
@@ -35,6 +37,13 @@ def parse_args():
     parser.add_argument('--max_epoch', type=int, default=150)
     parser.add_argument('--save_interval', type=int, default=5)
     parser.add_argument('--ignore_tags', type=list, default=['masked', 'excluded-region', 'maintable', 'stamp'])
+    
+    parser.add_argument('--wandb_logging', type=bool, default='True')
+    parser.add_argument('--wandb_entity', type=str, default='hi-ai')
+    parser.add_argument('--wandb_project', type=str, default='OCR_Project')
+    parser.add_argument('--wandb_name', type=str, default='EAST_1')
+    
+    #parser.add_argument('--seed', type=int, default=53)
 
     args = parser.parse_args()
 
@@ -43,10 +52,33 @@ def parse_args():
 
     return args
 
+# def set_seed(seed) :
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     #torch.cuda.manual_seed_all(seed) # if use multi-GPU
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
+#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     np.random.seed(seed)
+#     random.seed(seed)
+#     print(f"seed : {seed}")
 
 def do_training(data_dir, model_dir, device, image_size, input_size, num_workers, batch_size,
-                learning_rate, max_epoch, save_interval, ignore_tags):
-    # scenetext data
+                learning_rate, max_epoch, save_interval, ignore_tags, wandb_logging, wandb_entity, wandb_project, wandb_name ):
+    
+# def do_training(data_dir, model_dir, device, image_size, input_size, num_workers, batch_size,
+#                 learning_rate, max_epoch, save_interval, ignore_tags, wandb_logging, wandb_entity, wandb_project, wandb_name, seed ):
+    
+    # set_seed(seed)
+    
+    if wandb_logging:
+        wandb.login()
+        wandb.init(
+            entity=wandb_entity,
+            project=wandb_project,
+            name=wandb_name,
+            save_code=False
+        )
     dataset = SceneTextDataset(
         data_dir,
         split='train',
@@ -54,11 +86,9 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
         crop_size=input_size,
         ignore_tags=ignore_tags
     )
-    # EAST dataset
+
     dataset = EASTDataset(dataset)
-                    
-    num_batches = math.ceil(len(dataset) / batch_size) # batch 개수.
-    # train_loader. torch tensor 형태로 바꿈. input은 알아봐야함. 아마 numpy ndarray?
+    num_batches = math.ceil(len(dataset) / batch_size)
     train_loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -69,17 +99,40 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = EAST()
     model.to(device)
+    
+    # base
+    # optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+    
+    # # adamw, CosineAnnealingLR - v1
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=0.001)
+    
+    # # 순서 1
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=30, eta_max=1e-2, T_up=10, gamma=0.7)
+    
+    #순서 2
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[max_epoch // 2], gamma=0.1)
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.33)
+    
+    # 순서 3
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=1e-6)
+    # scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=30, eta_max=1e-2, T_up=10, gamma=0.7)
+    
+    
+    
 
-    model.train() # what this mean?
+    model.train()
+    print(cuda.is_available())
+  
     for epoch in range(max_epoch):
         epoch_loss, epoch_start = 0, time.time()
         with tqdm(total=num_batches) as pbar:
-            for img, gt_score_map, gt_geo_map, roi_mask in train_loader: # dataset describe
+            for img, gt_score_map, gt_geo_map, roi_mask in train_loader:
                 pbar.set_description('[Epoch {}]'.format(epoch + 1))
 
-                loss, extra_info = model.train_step(img, gt_score_map, gt_geo_map, roi_mask) # model
+                loss, extra_info = model.train_step(img, gt_score_map, gt_geo_map, roi_mask)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -87,18 +140,31 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
                 loss_val = loss.item()
                 epoch_loss += loss_val
 
-                pbar.update(1) #??
-                # 4 type loss ????? s
+                pbar.update(1)
                 val_dict = {
                     'Cls loss': extra_info['cls_loss'], 'Angle loss': extra_info['angle_loss'],
                     'IoU loss': extra_info['iou_loss']
                 }
+                if args.wandb_logging:
+                    wandb.log(val_dict)
+                    
                 pbar.set_postfix(val_dict)
+                
 
         scheduler.step()
+        
+        if args.wandb_logging:
+                wandb.log(
+                    {
+                        'Mean los': epoch_loss / num_batches,
+                        'epoch': epoch
+                    }
+                )
 
         print('Mean loss: {:.4f} | Elapsed time: {}'.format(
             epoch_loss / num_batches, timedelta(seconds=time.time() - epoch_start)))
+        
+        
 
         if (epoch + 1) % save_interval == 0:
             if not osp.exists(model_dir):
@@ -114,4 +180,5 @@ def main(args):
 
 if __name__ == '__main__':
     args = parse_args()
+    
     main(args)
