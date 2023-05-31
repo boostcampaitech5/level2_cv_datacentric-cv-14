@@ -13,6 +13,7 @@ from tqdm import tqdm
 #문제없나?-용환-
 from east_dataset import EASTDataset
 from dataset import SceneTextDataset
+from dataset import PreDataset
 from model import EAST
 from scheduler import CosineAnnealingWarmUpRestarts
 # 주석
@@ -23,7 +24,7 @@ def parse_args():
 
     # Conventional args
     parser.add_argument('--data_dir', type=str,
-                        default=os.environ.get('SM_CHANNEL_TRAIN', '../data/medical'))
+                        default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/medical'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR',
                                                                         'trained_models'))
 
@@ -86,8 +87,9 @@ def do_training(data_dir, model_dir, device, image_size, input_size, num_workers
         crop_size=input_size,
         ignore_tags=ignore_tags
     )
-
+    # EastDataset 지우고 PreDatset 사용하기
     dataset = EASTDataset(dataset)
+    # dataset = PreDataset("/opt/ml/input/data/pkls")
     num_batches = math.ceil(len(dataset) / batch_size)
     train_loader = DataLoader(
         dataset,
