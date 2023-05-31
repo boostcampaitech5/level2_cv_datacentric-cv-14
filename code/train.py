@@ -5,6 +5,9 @@ import math
 from datetime import timedelta
 from argparse import ArgumentParser
 
+import numpy as np
+import random
+
 import torch
 from torch import cuda
 from torch.utils.data import DataLoader
@@ -15,6 +18,7 @@ from east_dataset import EASTDataset
 from dataset import SceneTextDataset
 from dataset import PreDataset
 from model import EAST
+
 from scheduler import CosineAnnealingWarmUpRestarts
 # 주석
 import wandb
